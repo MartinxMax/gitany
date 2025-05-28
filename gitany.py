@@ -17,6 +17,7 @@ import re
 import matplotlib.pyplot as plt
 from collections import Counter
 from lib import github as gitrepo
+import webbrowser
 
 LOGO = r'''
         .__  __                       
@@ -167,46 +168,71 @@ class GitAny:
         print(f"- {repo.get('full_name')} | ⭐ {repo.get('stargazers_count', 0)} | 🍴 {repo.get('forks_count', 0)} | 🖥️ {repo.get('language')} | 📜 {repo.get('description')}")
 
     def graphy(self, _):
+        top_n = getattr(self, 'top_n', 20)
         if not os.path.exists(self.csv_path):
             print(f"[ERROR] CSV file not found: {self.csv_path}")
             return
-
-        names, stars, forks, languages = [], [], [], []
-
-        with open(self.csv_path, 'r', encoding='utf-8') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                names.append(row['full_name'])
-                stars.append(int(row.get('stargazers_count', 0)))
-                forks.append(int(row.get('forks_count', 0)))
-                lang = row.get('language', '') or "Unknown"
-                languages.append(lang)
-
-        total_repos = len(names)
-        if total_repos == 0:
+        df = pd.read_csv(self.csv_path)
+        if df.empty:
             print("[ERROR] No data found in CSV.")
             return
-
- 
-        width_per_repo = 0.5
-        fig_width = max(12, total_repos * width_per_repo)
-        font_size = 10 if total_repos <= 20 else max(5, 12 - (total_repos // 20))
- 
-        plt.figure(figsize=(fig_width, 6))
-        x = range(total_repos)
-        plt.bar(x, stars, label='Stars', color='gold')
-        plt.bar(x, forks, bottom=stars, label='Forks', color='skyblue')
-        plt.xticks(x, names, rotation=90, fontsize=font_size)
-        plt.title('Stars and Forks per Repository')
-        plt.legend()
+        df['language'] = df['language'].fillna('Unknown')
+        top_repos = df.nlargest(top_n, 'stargazers_count') \
+                    .sort_values('stargazers_count', ascending=True)
+        fig, ax = plt.subplots(figsize=(10, 6))
+        bars = ax.barh(
+            top_repos['full_name'],
+            top_repos['stargazers_count'],
+            picker=True        
+        )
+        for bar, url in zip(bars, top_repos['html_url']):
+            bar._url = url
+        def on_pick(event):
+            url = getattr(event.artist, '_url', None)
+            if url:
+                webbrowser.open(url)
+        fig.canvas.mpl_connect('pick_event', on_pick)
+        ax.set_xlabel('Stars')
+        ax.set_title(f'Top {top_n} Repositories by Stars\n(Click bar to open repo)')
+        ax.tick_params(axis='both', labelsize=8)
+        plt.tight_layout()
+        plt.show()
+        lang_count = df['language'].value_counts()
+        lang_pct = lang_count / lang_count.sum()
+        major = lang_pct[lang_pct >= 0.03]
+        others_pct = lang_pct[lang_pct < 0.03].sum()
+        pie_counts = pd.concat([major, pd.Series({'Others': others_pct})])
+        plt.figure(figsize=(8, 8))
+        plt.pie(
+            pie_counts,
+            labels=pie_counts.index,
+            autopct='%1.1f%%',
+            startangle=140
+        )
+        plt.title('Language Distribution')
         plt.tight_layout()
         plt.show()
 
- 
-        lang_count = Counter(languages)
-        plt.figure(figsize=(8, 8))
-        plt.pie(lang_count.values(), labels=lang_count.keys(), autopct='%1.1f%%')
-        plt.title('Language Distribution')
+        plt.figure(figsize=(10, 5))
+        plt.hist(df['stargazers_count'], bins=20)
+        plt.xlabel('Stars')
+        plt.ylabel('Frequency')
+        plt.title('Distribution of Stars (Histogram)')
+        plt.tight_layout()
+        plt.show()
+
+        top5_langs = lang_count.head(5).index
+        df_top5 = df[df['language'].isin(top5_langs)]
+        df_top5.boxplot(
+            column='stargazers_count',
+            by='language',
+            rot=45,
+            figsize=(10, 6) 
+        )
+        plt.title('Stars Distribution by Top 5 Languages')
+        plt.suptitle('')   
+        plt.xlabel('Language')
+        plt.ylabel('Stars')
         plt.tight_layout()
         plt.show()
 
